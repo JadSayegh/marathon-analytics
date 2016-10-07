@@ -5,6 +5,7 @@ from io import StringIO
 from datetime import datetime, timedelta
 import string
 
+import pdb
 ELEMENT_PER_RACE = 5
 
 
@@ -72,7 +73,7 @@ def get_gender(category):
 		m = re.search(r'^([MFmf])' , category)
 		if m:
 			return m.group(1).upper()
-	print(category) # Helps us see what we might have missed
+	# print("Irregular category:\t%s"%category) # Helps us see what we might have missed
 	
 	if 'garcons' in str(category) or 'hommes' in str(category):
 		return 'M'
@@ -88,7 +89,66 @@ def get_min_age(date, category):
 	return min_age
 
 
+def get_datetime_from_str(date_str):
+	format = "%Y-%m-%d"
+	return (datetime.strptime(date_str, format))
+
+def agg_min_age(ages):
+	# uses the max function because the goal is narrow the spread between min and max
+	return ages.max()
+
+def agg_max_age(ages):
+	# uses the min function because the goal is narrow the spread between min and max
+	ages = ages.dropna()
+	if not ages.empty:
+		return ages.min()
+	else:
+		return np.NaN
+
+def agg_gender(genders):
+	genders = genders.dropna()
+	if not genders.empty:
+		if genders.nunique() ==1 :
+			# Use first element for gender
+			return genders.values[0] 
+		elif genders.nunique() == 2 and 'M' in genders.values and 'F' in genders.values:
+			return "MF"
+		else:
+			pdb.set_trace()
+
+			print("Gender class irregularity")
+			return "??"
+	else:
+		return np.NaN
+
+def get_participant_info(data, output_path="data/participant_data.csv"):
+	# get age, gender info from each participant race entry
+	
+	participant_race_data = pd.DataFrame()
+	participant_race_data['participant id'] = data['participant id']
+
+	#Below: axis=1 --> apply to each row
+	data['date'] = data['event date'].apply(get_datetime_from_str) # get event date in date time object
+	participant_race_data['max age'] = data[['date', 'category']].apply(lambda x: get_max_age(*x), axis=1) 
+	participant_race_data['min age'] = data[['date', 'category']].apply(lambda x: get_min_age(*x), axis=1)
+	participant_race_data['gender'] = data['category'].apply(get_gender) # No axis because 'apply' called by a Series
+
+	participant_data = participant_race_data.groupby(['participant id']).agg({ 	
+		'max age' : agg_max_age, 
+		'min age' : agg_min_age, 
+		'gender' : agg_gender})
+	# Use the average of max and min age as the participant's age
+	participant_data['age'] = (participant_data['max age'] + participant_data['min age'] )/ 2
+	pdb.set_trace()
+	# Keep min and max age as reference as an indicator of age accuracy
+	participant_data = participant_data.reindex_axis(['gender','age', 'min age','max age'], axis=1)
+	
+	with open(output_path, 'w') as output_file:
+		participant_data.to_csv(output_file)
 
 
-make_clean_marathon_file("data2/marathon.csv")
+
+#make_clean_marathon_file("data/marathon.csv")
+# data = pd.read_csv("data/marathon_clean.csv")
+# get_participant_info(data)
 
