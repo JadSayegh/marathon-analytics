@@ -11,7 +11,9 @@ Since I want to be able to use each race data as its own entry (and also because
 
 As a first try I parsed the lines using .split(',')
 
+```python
 line_elm = line.strip().split(',')
+```
 
 However, this would tripped on rows containing commas such as the one below
 
@@ -19,6 +21,7 @@ However, this would tripped on rows containing commas such as the one below
 
 Instead, I used the built in `csv` module to deal with the in-field commas, and as an added bonus, replaced the commas by periods. While this doesn't hurt the readability of categorical data, at least this way values such as "25,5 km" still make sense. NOTE: This probably isn't a good idea if there are values like "10,000" in the dataset.
 
+```pythonn
 with open('data/marathon_clean.csv' , 'w') as clean:
 	for index, line in enumerate(org):	
 		line_stream = StringIO(line)
@@ -26,64 +29,24 @@ with open('data/marathon_clean.csv' , 'w') as clean:
 		line_elm = list(csv.reader(line_stream, skipinitialspace=True))[0]
 		for i, elm in enumerate(line_elm):
 			line_elm[i] = elm.replace(',', '.').lower()
+```
 
 Now that that's out of the way, I extract the headers from the first line, then go through every line and breaking up everything that's after the participant ID into chunks of 5. Each of these is now it's own line, in a more coherent table. 
 
 In case there's any issues with the way a particular csv line is structured I use the code below to make sure that the number of line elements checks out. If not I print a message and skip this line. Another approach would print the faulty line to a "trouble.csv" file on which we can experiment to see more clearly why our current code isn't working. This is the approach I used to find the issues discussed above.
 
+```python
 # check if this line is faulty (too many / too few values to add to the dataframe)
 if (len(line_elm) - 1) % 5 != 0:
 	print("ERROR on line %s: line length was %s"%(index + 1, len(line_elm)))
 	continue
-
-Full function code below:
-
-
-def make_clean_marathon_file(csv_path):
-	# line below changes "data/abc.csv" to "data/abc_clean.csv"
-	clean_csv_path = "".join([*csv_path.split('.')[:-1], "_clean.csv"]) 
-	
-	with open(csv_path, 'r') as original:
-		with open(clean_csv_path , 'w') as clean:
-			for index, line in enumerate(original):	
-				# line_elm = line.strip().split(',')
-				# line_len = len(line_elm)
-
-				line_stream = StringIO(line)
-				# handles lines with commas in the fields and make lower case
-				line_elm = list(csv.reader(line_stream, skipinitialspace=True))[0]
-				for i, elm in enumerate(line_elm):
-					line_elm[i] = elm.replace(',', '.').lower()
-				
-				# check if this line is faulty (too many / too few values to add to the dataframe)
-				if (len(line_elm) - 1) % 5 != 0:
-					print("ERROR on line %s: line length was %s"%(index + 1, len(line_elm)))
-					continue
-
-
-				# take headers from first line
-				if index == 0 :
-					clean.write('%s\n'%','.join(line_elm[:6]))
-					continue
-				
-				participant = line_elm[0]
-
-				line_elm = line_elm[1:]
-				while line_elm:
-					if len(line_elm) < 5:
-						print("ERROR parsing data: not enough data in line %s, length was %s:\n\n%s\n\n"%(index + 1, line_len, line))
-						break
-	
-						
-					clean.write('%s\n'%','.join([participant] + line_elm[:5]))
-					line_elm = line_elm[5:]
-
+```
 
 ### Extracting/Estimating Age and Gender
 
 My first bit of data mining concerned getting information on each participant's age and gender from the "category" colums. Since most categories are expressed in age brackets, I decided to use these age brackets with the race date to calculate, for every participant, a maximum age and minimum age according to each race. 
 
-
+```python
 participant_race_data = pd.DataFrame()
 participant_race_data['participant id'] = data['participant id']
 participant_race_data['max age'] = data[['date', 'category']].apply(lambda x: get_max_age(*x), axis=1)
@@ -122,9 +85,10 @@ def get_max_age(date, category):
 def get_min_age(date, category):
 	min_age, _ = get_age_bracket(date, category)
 	return min_age
-
+```
 Now that I have the info from each race, it's time to bring all that information together to get the most accurate estimate: I group each race entry by participant, and aggregate the max age, min age and gender. While we end up with some participants having no age / gender data, most participants' age is estimated within a 3 year margin of error, well below the max tolerance threshold, given that we want to use this data to predict their performance.
 
+```python
 def get_gender(category):
 	if category and not pd.isnull(category):
 		m = re.search(r'^([MFmf])' , category)
@@ -132,39 +96,7 @@ def get_gender(category):
 			return m.group(1).lower()
 	print(category) # Helps us see what we might have missed
 	return np.NaN
-
+```
 
 For the gender data, while most race cateogries specified gender, some didn't and a few others did so in unexpected ways. By printing out everything that didn't fit the general case, I found that 'hommes' or 'garcons' (French for 'men' and 'boys') was being also being used. 
 
-
-
-def agg_min_age(ages):
-	# uses the max function because the goal is narrow the spread between min and max
-	return ages.max()
-
-def agg_max_age(ages):
-	# uses the max function because the goal is narrow the spread between min and max
-	ages = ages.where(ages != np.NaN)
-	if not ages.empty:
-		return ages.min()
-	else:
-		return np.NaN
-
-def agg_gender(genders):
-	# uses the max function because the goal is narrow the spread between min and max
-	genders = genders.where(genders != np.NaN)
-	if not genders.empty:
-		if genders.nunique() > 1 :
-			# Use first element for gender
-			return genders[0] 
-		else:
-			print("Gender class conflict.")
-			return "??"
-	else:
-		return np.NaN
-
-
-participant_data = participant_race_data.groupby(['participant id']).agg({ 	'max age' : agg_max_age,
-																			 	'min age' : agg_min_age,
-																			  	'gender' : agg_gender})
-participant_data['age'] = (participant_data['max age'] + participant_data['min age'] )/ 2
